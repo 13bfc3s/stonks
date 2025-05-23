@@ -1,5 +1,3 @@
-# pine_injector.py
-
 import re
 from typing import Dict, Any
 
