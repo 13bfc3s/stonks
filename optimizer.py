@@ -1,5 +1,7 @@
 import random
 from typing import Any, Dict, List, Tuple
+import concurrent.futures
+import pandas as pd
 
 from skopt import gp_minimize
 from skopt.space import Real, Integer, Categorical
@@ -7,6 +9,7 @@ from skopt.utils import use_named_args
 
 from backtester import Backtester, BacktestResult
 from strategies import StrategyTemplate
+from data_manager import load_data, load_templates
 
 
 class EnsembleSampler:
@@ -24,7 +27,6 @@ class EnsembleSampler:
         selected = random.sample(self.templates, self.num_strategies)
         variants: List[Tuple[str, str, Dict[str, Any]]] = []
         for tmpl in selected:
-            # Randomly choose parameters from the template's defined param_space
             params = {}
             for name, space in tmpl.param_space.items():
                 if space['type'] == 'int':
@@ -69,7 +71,6 @@ class BayesianOptimizer:
             best_params: dict of parameter name to optimal value
             best_score: achieved metric value
         """
-        # Build skopt search spaces
         dimensions = []
         for name, space in template.param_space.items():
             if space['type'] == 'int':
@@ -83,14 +84,11 @@ class BayesianOptimizer:
 
         @use_named_args(dimensions)
         def objective(**params) -> float:
-            # Instantiate and backtest strategy
             script = template.instantiate(params)
             result: BacktestResult = self.backtester.run(script)
             score = getattr(result, self.metric)
-            # We minimize objective -> return negative profit
             return -float(score)
 
-        # Run Bayesian optimization
         result = gp_minimize(
             func=objective,
             dimensions=dimensions,
@@ -99,28 +97,67 @@ class BayesianOptimizer:
             random_state=42
         )
 
-        # Extract best parameters and score
         best_params = {dim.name: val for dim, val in zip(dimensions, result.x)}
         best_score = -result.fun
         return best_params, best_score
 
 
-# Example usage within optimizer module
+def scan_optimize(
+    symbols: List[str],
+    periods: List[Tuple[str, str]],
+    templates_dir: str = 'templates',
+    workers: int = 4,
+    n_initial: int = 10,
+    n_calls: int = 50
+) -> pd.DataFrame:
+    """
+    Runs Bayesian optimization across multiple symbols and periods in parallel.
+
+    Returns a DataFrame of results: symbol, start, end, template, best_params, best_score.
+    """
+    # Load data and templates
+    data = load_data()
+    templates = load_templates(templates_dir)
+
+    tasks = []
+    for sym in symbols:
+        sym_u = sym.upper()
+        if sym_u not in data:
+            continue
+        for start, end in periods:
+            bt_data = data[sym_u].loc[start:end]
+            for tmpl in templates:
+                tasks.append((sym_u, start, end, tmpl))
+
+    def _opt_task(task):
+        sym, start, end, tmpl = task
+        df = data[sym].loc[start:end]
+        bt = Backtester(df)
+        optimizer = BayesianOptimizer(bt)
+        best_params, best_score = optimizer.optimize(tmpl, n_initial=n_initial, n_calls=n_calls)
+        return {
+            'symbol': sym,
+            'start': start,
+            'end': end,
+            'template': tmpl.name,
+            'best_params': best_params,
+            'best_score': best_score
+        }
+
+    results = []
+    with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
+        for res in executor.map(_opt_task, tasks):
+            results.append(res)
+
+    df_res = pd.DataFrame(results)
+    return df_res
+
+
+# Example usage
 if __name__ == '__main__':
-    # Placeholder: load strategy templates and data
-    from data_manager import load_templates, load_data
-
-    templates = load_templates('/strategies')
-    data = load_data('/data')
-
-    backtester = Backtester(data)
-    sampler = EnsembleSampler(templates, num_strategies=5)
-    variants = sampler.sample()
-    print("Sampled Ensemble Variants:")
-    for name, script, params in variants:
-        print(f"{name}: params={params}")
-
-    # Optimize the first template as a demo
-    optimizer = BayesianOptimizer(backtester)
-    best_params, best_score = optimizer.optimize(templates[0], n_initial=15, n_calls=60)
-    print(f"Best params: {best_params}, Best score: {best_score}")
+    # Example symbols and periods
+    symbols = ['AAPL', 'MSFT']  # or parse from CLI
+    periods = [('2010-01-01', '2015-12-31'), ('2016-01-01', '2020-12-31')]
+    df_results = scan_optimize(symbols, periods, workers=4, n_initial=15, n_calls=60)
+    df_results.to_csv('opt_results.csv', index=False)
+    print("Optimization scan complete, results saved to opt_results.csv")
