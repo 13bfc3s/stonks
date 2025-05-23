@@ -3,7 +3,7 @@ import json
 import requests
 from typing import List, Dict, Any
 import pandas as pd
-
+BacktestResult = Dict[str, Any]
 from strategies import StrategyTemplate
 
 
