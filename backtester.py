@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-# backtester.py
 
 import datetime
 from typing import Any, Dict, List
 
 import pandas as pd
+from typing import Any, Dict
+
+BacktestResult = Dict[str, Any]
 
 class Backtester:
     """
