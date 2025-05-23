@@ -1,1 +1,6 @@
+cat << 'EOF' >> .gitignore
 git.pub
+/data/
+/strategies/
+/templates/
+/tests/
