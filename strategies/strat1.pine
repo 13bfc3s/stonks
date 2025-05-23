@@ -1,0 +1,61 @@
+//@version=5
+strategy("(EMA+MACD+RSI+Volume)", overlay=false, default_qty_type=strategy.percent_of_equity, default_qty_value=10)
+
+// Input parameters
+fastEMA      = input.int(50,  "Fast EMA Period")
+slowEMA      = input.int(200, "Slow EMA Period")
+rsiPeriod    = input.int(14,  "RSI Period")
+rsiOverbought= input.int(70,  "RSI Overbought")
+rsiOversold  = input.int(30,  "RSI Oversold")
+macdFast     = input.int(12,  "MACD Fast Length")
+macdSlow     = input.int(26,  "MACD Slow Length")
+macdSignal   = input.int(9,   "MACD Signal Smoothing")
+volSMA       = input.int(20,  "Volume SMA Period")
+takeProfitPerc = input.float(2.0, "Take Profit %", step=0.1) / 100
+stopLossPerc   = input.float(1.0, "Stop Loss %", step=0.1) / 100
+
+// Calculations
+emaFast   = ta.ema(close, fastEMA)
+emaSlow   = ta.ema(close, slowEMA)
+rsi       = ta.rsi(close, rsiPeriod)
+[macdLine, signalLine, hist] = ta.macd(close, macdFast, macdSlow, macdSignal)
+volSMAval = ta.sma(volume, volSMA)
+
+// Conditions
+bullishEMACross = ta.crossover(emaFast, emaSlow)
+bearishEMACross= ta.crossunder(emaFast, emaSlow)
+rsiBull = rsi > 50
+rsiBear = rsi < 50
+macdBull= hist > 0
+macdBear= hist < 0
+volAbove= volume > volSMAval
+
+longCondition  = bullishEMACross and rsiBull  and macdBull  and volAbove
+shortCondition = bearishEMACross and rsiBear  and macdBear and volAbove
+
+// Strategy Entries
+if (longCondition)
+    strategy.entry("Long", strategy.long)
+if (shortCondition)
+    strategy.entry("Short", strategy.short)
+
+// Exits
+strategy.exit("Exit Long", from_entry="Long",   profit=takeProfitPerc * close, loss=stopLossPerc * close)
+strategy.exit("Exit Short", from_entry="Short", profit=takeProfitPerc * close, loss=stopLossPerc * close)
+
+// Plot Price EMAs on price scale
+plot(emaFast, title="Fast EMA", color=color.blue)
+plot(emaSlow, title="Slow EMA", color=color.orange)
+
+// Plot MACD Histogram
+plot(hist, style=plot.style_histogram, title="MACD Histogram")
+hline(0, "MACD Zero", color=color.gray)
+
+// Plot RSI with Overbought/Oversold
+hline(rsiOverbought, "RSI Overbought", color=color.red)
+hline(rsiOversold,   "RSI Oversold",   color=color.green)
+plot(rsi, title="RSI", color=color.purple)
+
+// Plot Volume and its SMA
+plot(volume, style=plot.style_columns, title="Volume")
+plot(volSMAval, title="Volume SMA", color=color.green)
